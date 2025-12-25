@@ -222,7 +222,7 @@ function applyFilters() {
                     );
                     
                     // Check if row contains all selected filter words
-                    if (!currentFilters[f.property].every(c => rows[i][col].includes(c))) {
+                    if (!currentFilters[f.property].every(c => rows[i][col]?.includes(c))) {
                         // Hide row if it doesn't match filter criteria
                         showRow = false;
                         continue; // Skip remaining filters for this row
