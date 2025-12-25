@@ -1,6 +1,6 @@
 /**
  * Single Page DB - A custom view for Obsidian Dataview plugin
- * Version 0.2 (23-03-2025)
+ * Version 0.2.2 (25-12-2025)
  * 
  * This script displays data from a single markdown file's frontmatter in an editable table.
  * It allows for in-place editing of frontmatter data through a convenient interface.
@@ -62,35 +62,58 @@ async function updateFrontmatter(parent, id, idValue, property, value) {
  * Creates filter buttons for "byWords" type filters and search input for "search" type
  */
 function displayFilters() {
+    // Iterate through each filter configuration
     for (const f of input.filters) {
         switch(f.type) {
             case "byWords":
-                // Build list of words used as filter from the relevant frontmatter property
+                // ---------- WORD FILTER SECTION ----------
+                
+                // Build list of unique words from the relevant frontmatter property
                 let filterWords = [...new Set(
+                    // Get all parent items from dataview
                     dv.current()[input.editable.parent]
-                    .flatMap(x => x[f.property] ? x[f.property].split(" ") : "")
-                    .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase())) // case insensitive sort
-                    .filter(Boolean) // remove empty element, if any
+                        // Extract property values and split into individual words
+                        .flatMap(x => x[f.property] ? x[f.property].split(" ") : "")
+                        // Sort words alphabetically (case insensitive)
+                        .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
+                        // Remove any empty elements
+                        .filter(Boolean)
                 )];
+                
+                // Initialize empty array for tracking active filters for this property
                 currentFilters[f.property] = [];
+                
+                // Display filter section label
                 dv.span(`Filter by ${f.name}: `);
                 
-                // Display tag toggle buttons
+                // Create toggle button for each unique filter word
                 filterWords.forEach(w => {
+                    // Track if this word is currently active in the filter
                     let isActive = currentFilters[f.property].includes(w);
+                    
+                    // Set button text with appropriate checkbox icon
                     let buttonText = isActive ? `✅ ${w}` : `⬜ ${w}`;
+                    
+                    // Create the button element
                     dv.el("button", buttonText, {
                         attr: { 
                             class: `filterBy${f.property}`,
                             style: "margin: 4px; cursor: pointer;",
                         },
                         onclick: async (event) => {
+                            // Check if word is already in filter
                             isActive = currentFilters[f.property].includes(w);
+                            
+                            // Toggle word in/out of active filters
                             if (isActive) {
+                                // Remove word from filter
                                 currentFilters[f.property] = currentFilters[f.property].filter(word => word !== w);
                             } else {
+                                // Add word to filter
                                 currentFilters[f.property] = [...currentFilters[f.property], w];
                             }
+                            
+                            // Update button appearance
                             const button = event.target.closest("button");
                             if (button.innerHTML.includes("✅ ")) {
                                 button.innerHTML = button.innerHTML.replace("✅", "⬜");
@@ -98,31 +121,72 @@ function displayFilters() {
                             else {
                                 button.innerHTML = button.innerHTML.replace("⬜", "✅");
                             }
+                            
+                            // Refresh filtered view
                             applyFilters();
                         }
                     });
                 });
                 
-                // Add Clear Filters button
+                // Create a "Clear Filters" button for this filter group
                 dv.el("button", "🗑️ Clear Filters", {
                     attr: { style: "margin: 8px; padding: 4px 8px; cursor: pointer; background-color: #f66; color: white; border: none; border-radius: 6px;" },
                     onclick: async () => {
+                        // Reset the filter array
                         currentFilters[f.property] = [];
+                        
+                        // Update all filter buttons to unchecked state
                         Array.from(dv.container.querySelectorAll(`button.filterBy${f.property}`)).forEach(
                             b => b.innerHTML = b.innerHTML.replace("✅", "⬜")
                         );
+                        
+                        // Refresh filtered view
                         applyFilters();
                     }
                 });
+                
+                // Add spacing after filter group
                 dv.paragraph("");
                 break;
                 
             case "search":
-                dv.el("div", "<span>Search: </span><input></input>", {attr: {id: "search", style: "display: flex"}});
-                dv.container.querySelector("div#search input").addEventListener("blur", applyFilters);
+                // ---------- SEARCH FILTER SECTION ----------
+                
+                // Create search input element with label and buttons
+                dv.el("div", "<span>Search: </span><input></input><button class='search-trigger' title='Search'>🔍</button><button class='search-clear' title='Clear'>✖️</button>", {
+                    attr: {
+                        id: "search", 
+                        style: "display: flex; align-items: center;"
+                    }
+                });
+                
+                const searchInput = dv.container.querySelector("div#search input");
+                const searchButton = dv.container.querySelector("div#search button.search-trigger");
+                const clearButton = dv.container.querySelector("div#search button.search-clear");
+                
+                // Apply filters when user finishes typing (blur event)
+                searchInput.addEventListener("blur", applyFilters);
+                
+                // Apply filters when pressing Enter key
+                searchInput.addEventListener("keydown", (event) => {
+                    if (event.key === "Enter") {
+                        event.preventDefault();
+                        applyFilters();
+                    }
+                });
+                
+                // Apply filters when clicking the search button
+                searchButton.addEventListener("click", applyFilters);
+                
+                // Clear search and apply filters when clicking the clear button
+                clearButton.addEventListener("click", () => {
+                    searchInput.value = "";
+                    applyFilters();
+                });
                 break;
                 
             default:
+                // Handle unknown filter types
                 throw new Error(`Unknown filter type: ${f.type}`);
                 break;
         }
@@ -135,41 +199,64 @@ function displayFilters() {
  * Updates the row count in the table header
  */
 function applyFilters() {
+    // Counter for visible rows after filtering
     let visibleRowCount = 0;
+    
+    // Get all table rows
     let tableRows = dv.container.querySelectorAll("table tbody tr");
     
+    // Process each row in the table
     for (let i = 0; i < rows.length; i++) {
+        // Start with assumption that row should be visible
         let showRow = true;
         
+        // Check each filter configuration
         for (const f of input.filters) {
             switch(f.type) {
                 case "byWords":
+                    // ---------- WORD FILTER LOGIC ----------
+                    
+                    // Find which column corresponds to this filter
                     const col = Array.from(dv.container.querySelectorAll("table.editable th")).findIndex(
                         h => h.textContent == f.name
                     );
+                    
+                    // Check if row contains all selected filter words
                     if (!currentFilters[f.property].every(c => rows[i][col].includes(c))) {
+                        // Hide row if it doesn't match filter criteria
                         showRow = false;
-                        continue; // out of filters loop
+                        continue; // Skip remaining filters for this row
                     }
                     break;
                     
                 case "search":
+                    // ---------- SEARCH FILTER LOGIC ----------
+                    
+                    // Get current search text from input
                     const searchText = dv.container.querySelector("div#search input").value;
-                    if (searchText && !rows[i].some(r => r?.includes(searchText))) {
+                    
+                    // Only apply search if there's actual text entered
+                    if (searchText && !rows[i].some(r => 
+						r?.toString().toLowerCase().includes(searchText.toLowerCase())
+					)) {
+                        // Hide row if no cell contains the search text
                         showRow = false;
-                        continue; // out of filters loop
+                        continue; // Skip remaining filters for this row
                     }
                     break;
             }
         }
         
+        // Show or hide the row based on filter results
         tableRows[i].style.display = showRow ? "table-row" : "none";
+        
+        // Count visible rows for the summary
         if (showRow) {
             visibleRowCount += 1;
         }
     }
     
-    // Update visible row count in the table header
+    // Update the visible row count in the table header
     dv.container.querySelector("table.editable th span.dataview.small-text").textContent = visibleRowCount;
 }
 
@@ -201,7 +288,8 @@ async function tableClick(event) {
         input?.editable?.properties?.[col]) { 
         const row = td.parentElement.rowIndex - 1;
         // Replace cell content with editable textarea
-        td.innerHTML = `<textarea>${rows[row][col]}</textarea>`;
+        const value = rows[row][col] || "";
+        td.innerHTML = `<textarea>${value}</textarea>`;
     }
 }
 
@@ -265,9 +353,31 @@ async function renderInlineDb(input) {
     let styleBlock = document.createElement("style");
     styleBlock.innerHTML = `
         table.editable textarea {width: 100%;}
-        div#search > span {display: flex; width: 100%;}
+        div#search {display: flex; width: 100%; align-items: center;}
+        div#search > span {display: flex; width: 100%; align-items: center;}
         div#search > span > span {padding-right: 10px;}
-        div#search input {flex: 1;}
+        div#search input {flex: 1; padding: 4px 8px;}
+        div#search button {
+            margin-left: 4px;
+            padding: 4px 8px;
+            cursor: pointer;
+            border: 1px solid var(--background-modifier-border);
+            background: var(--background-secondary);
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        div#search button:hover {
+            background: var(--background-modifier-hover);
+        }
+        div#search button.search-clear {
+            background: #dc3545;
+            color: white;
+            border-color: #dc3545;
+        }
+        div#search button.search-clear:hover {
+            background: #c82333;
+            border-color: #c82333;
+        }
     `;
     dv.container.appendChild(styleBlock);
     
